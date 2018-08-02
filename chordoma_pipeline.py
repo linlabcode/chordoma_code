@@ -34,7 +34,8 @@ THE SOFTWARE.
 
 
 import sys
-sys.path.append('/ark/home/cl512/src/pipeline/')
+pipeline_dir = '/ark/home/cl512/src/pipeline/'
+sys.path.append(pipeline_dir)
 
 import pipeline_dfci
 import utils
@@ -48,7 +49,7 @@ from collections import defaultdict
 
 
 projectName = 'chordoma_fix'
-dataFile = '/grail/projects/%s/CHORDOMA_PRIMARY_TABLE.txt' % (projectName)
+
 genome ='hg19'
 annotFile = '/ark/home/cl512/src/pipeline/annotation/%s_refseq.ucsc' % (genome)
 
@@ -75,9 +76,26 @@ primary_list = ['PRIMARY_CHOR_269A7_H3K27AC','PRIMARY_CHOR_A269A1_H3K27AC','PRIM
 
 
 
-all_data_file = '%sCHORDOMA_H3K27AC_ALL_TABLE.txt' % (projectFolder)
+
 lines_list = ['MUGCHOR1_H3K27AC','UCH1_H3K27AC','UCH2_H3K27AC','UMCHOR1_H3K27AC','JHC7_H3K27AC']
 
+
+
+#==========================================================================
+#================================DATA TABLES===============================
+#==========================================================================
+
+#primary samples
+dataFile = '/grail/projects/%s/data_tables/CHORDOMA_PRIMARY_TABLE.txt' % (projectName)
+
+#h3k27ac in all samples
+all_data_file = '%sdata_tables/CHORDOMA_H3K27AC_GEO_TABLE.txt' % (projectFolder)
+
+#atac only
+atac_data_file = '%sdata_tables/CHORDOMA_ATAC_GEO_TABLE.txt' % (projectFolder)
+
+#lines samples
+line_data_file = '%sdata_tables/CHORDOMA_TABLE.txt' % (projectFolder)
 
 
 #==========================================================================
@@ -173,7 +191,7 @@ for name in namesList:
 
 
 
-#line_data_file = '%sCHORDOMA_TABLE.txt' % (projectFolder)
+#line_data_file = '%sdata_tables/CHORDOMA_TABLE.txt' % (projectFolder)
 
 #namesList = ['UCH1_T']
 #pipeline_dfci.callMacs(line_data_file,macsFolder,namesList,overwrite=False,pvalue='1e-9',useBackground=True)
@@ -280,8 +298,11 @@ def summarizeData(dataFile,output ='',namesList= []):
         #spotScore = spotTable[1][0].split(' ')[-1]
 
         #get the peak count
-        peakCollection = utils.importBoundRegion('%s%s' % (macsEnrichedFolder,dataDict[name]['enrichedMacs']),name)
-        peakCount = len(peakCollection)
+        if name.count('H3K27AC') == 1 or name.count('ATAC') ==1:
+            peakCollection = utils.importBoundRegion('%s%s' % (macsEnrichedFolder,dataDict[name]['enrichedMacs']),name)
+            peakCount = len(peakCollection)
+        else:
+            peakCount = 'NA'
 
 
 
@@ -290,33 +311,62 @@ def summarizeData(dataFile,output ='',namesList= []):
         readTable.append(newLine)
 
 
-
     utils.unParseTable(readTable,output,'\t')    
 
-output = '%stables/PRIMARY_CHORDOMA_H3K27AC_SUMMARY.txt' % (projectFolder)
-# summarizeData(dataFile,output,namesList= [name for name in dataDict.keys() if name.count('H3K27AC') == 1])
+#for primary
+#output = '%stables/PRIMARY_CHORDOMA_H3K27AC_SUMMARY.txt' % (projectFolder)
+#summarizeData(dataFile,output,namesList= [name for name in dataDict.keys() if name.count('H3K27AC') == 1])
+
+#for lines and primary
+#output = '%stables/CHORDOMA_GEO_H3K27AC_SUMMARY.txt' % (projectFolder)
+#summarizeData(all_data_file,output,namesList= [])
+
+
+#for cell line atac
+#output = '%stables/CHORDOMA_GEO_ATAC_SUMMARY.txt' % (projectFolder)
+#summarizeData(atac_data_file,output,namesList= [])
+
+
+
+
+
+
+
+
 
 #==========================================================================
-#======================TEST MAPPING W/ BATCH===============================
+#========================CALLING ROSE ON CELL LINES========================
 #==========================================================================
-# gffList = ['%sHG19_CHORDOMA_FIGURE_GENES.gff' % (gffFolder)]
-# namesList = ['PRIMARY_CHOR_A269A1_H3K27AC']
 
-# pipeline_dfci.mapBamsBatch(dataFile,gffList,mappedFolder,False,namesList,extension=200)
+# # #CALLING ROSE ON H3K27AC DATA
+# lines_data_dict = pipeline_dfci.loadDataTable(line_data_file)
+# namesList = [name for name in lines_data_dict.keys() if name.count("H3K27AC") == 1]
+# print(namesList)
+# parentFolder = '%srose_final' % (projectFolder)
+# parentFolder = utils.formatFolder(parentFolder,True)
+
+# maskFile ='/raider/index/hg19/Masks/hg19_encode_blacklist.bed'
+# bashFileName = '%srose_final/chordoma_h3k27ac_rose.sh' %(projectFolder)
+
+# #all datasets
+# #2500 tss exclusion
+# #auto stitching
+# pipeline_dfci.callRose2(line_data_file,macsEnrichedFolder,parentFolder,namesList,[],'',2500,'',bashFileName,maskFile)
+
 
 
 #==========================================================================
-#==============================CALLING ROSE================================
+#=========================CALLING ROSE ON PRIMARY==========================
 #==========================================================================
 
 # #CALLING ROSE ON H3K27AC DATA
 # namesList = [name for name in dataDict.keys() if name.upper().count("H3K27AC") == 1]
 
-# parentFolder = '%srose' % (projectFolder)
+# parentFolder = '%srose_final' % (projectFolder)
 # parentFolder = utils.formatFolder(parentFolder,True)
 
 # maskFile ='/raider/index/hg19/Masks/hg19_encode_blacklist.bed'
-# bashFileName = '%srose/primary_chordoma_h3k27ac_rose.sh' %(projectFolder)
+# bashFileName = '%srose_final/primary_chordoma_h3k27ac_rose.sh' %(projectFolder)
 
 # #all datasets
 # #2500 tss exclusion
@@ -325,13 +375,52 @@ output = '%stables/PRIMARY_CHORDOMA_H3K27AC_SUMMARY.txt' % (projectFolder)
 
 
 
+#==========================================================================
+#===================RUNNING GENE MAPPER ON ROSE OUTPUT=====================
+#==========================================================================
+
+
+def wrapGeneMapper(data_file,names_list=[],launch=True):
+
+    '''
+    runs ROSE2 GENE MAPPER on the AllEnhancers table
+    '''
+
+    data_dict = pipeline_dfci.loadDataTable(data_file)
+    parent_rose_folder = utils.formatFolder('%srose_final' % (projectFolder),False)
+
+    if len(names_list) ==0:
+        names_list=[name for name in data_dict.keys() if name.upper().count('H3K27AC') ==1]
+
+    #find each individual all enhancer table and then call the mapper via an .sh script
+    for name in names_list:
+        print(name)
+        dataset_rose_folder = utils.formatFolder('%s%s_ROSE' %(parent_rose_folder,name),False)
+        all_enhancer_path = '%s%s_peaks_AllEnhancers.table.txt' % (dataset_rose_folder,name)
+
+        #print(all_enhancer_path)
+        mapper_bash_path = '%s%s_geneMapper.sh' % (dataset_rose_folder,name)
+        mapper_bash_file = open(mapper_bash_path,'w')
+        mapper_bash_file.write('#!/usr/bin/bash\n\n\n\n')
+        mapper_bash_file.write('#Running ROSE2 GENE MAPPER ON %s ALL ENHANCERS OUTPUT\n\n' % (name))
+        mapper_cmd = 'python %sROSE2_geneMapper.py -g %s -i %s -f -w 100000' % (pipeline_dir,genome,all_enhancer_path)
+        mapper_bash_file.write(mapper_cmd+'\n')
+        mapper_bash_file.close()
+        print('wrote gene mapper command to %s' % (mapper_bash_path))
+        if launch:
+            os.system('bash %s' % mapper_bash_path) 
+#for lines
+#wrapGeneMapper(line_data_file,names_list=[],launch=True)
+
+#wrapGeneMapper(dataFile,names_list=[],launch=False)
+
 
 
 #==========================================================================
-#===========================CALLING META ROSE==============================
+#===================CALLING META ROSE ON PRIMARY DATA======================
 #==========================================================================
 
-#  #for primary
+# #for primary
 # analysisName = 'primary_chordoma_h3K27ac_final'
 
 # primary_list = ['PRIMARY_CHOR_A269A1_H3K27AC',
@@ -371,23 +460,85 @@ output = '%stables/PRIMARY_CHORDOMA_H3K27AC_SUMMARY.txt' % (projectFolder)
 # bashFile.write(metaRoseCmd + '\n')
 
 
+#==========================================================================
+#======================CALLING META ROSE ON LINES==========================
+#==========================================================================
 
+# #for analysis on cell lines
+# line_data_file = '%sdata_tables/CHORDOMA_TABLE.txt' % (projectFolder)
+# line_dataDict = pipeline_dfci.loadDataTable(line_data_file)
+# analysisName = 'chordoma_h3K27ac'
+# namesList = [name for name in line_dataDict.keys() if name.count('H3K27AC') == 1]
+# print(namesList)
+
+# bamFileList = [line_dataDict[name]['bam'] for name in namesList]
+# bamString = string.join(bamFileList,',')
+
+# controlBams = [line_dataDict[name]['background'] for name in namesList]
+# controlFileList = [line_dataDict[name]['bam'] for name in controlBams]
+# controlBamString = string.join(controlFileList,',')
+
+# bedFileList = [macsEnrichedFolder + line_dataDict[name]['enrichedMacs'] for name in namesList]
+# bedString = string.join(bedFileList,',')
+
+# roseFolder = '%smeta_rose/' % (projectFolder)
+# roseFolder = utils.formatFolder(roseFolder,True)
+
+# outputFolder = '%s%s/' % (roseFolder,analysisName)
+# bashFileName = '%s%s_meta_rose.sh' % (roseFolder,analysisName)
+
+# bashFile = open(bashFileName,'w')
+# bashFile.write('#!/usr/bin/bash\n\n')
+# bashFile.write('cd /ark/home/cl512/pipeline/\n')
+
+
+# maskFile ='/raider/index/hg19/Masks/hg19_encode_blacklist.bed'
+# metaRoseCmd = 'python /ark/home/cl512/pipeline/ROSE2_META.py -g hg19 -i %s -r %s -c %s -o %s -n %s -t 2500 --mask %s' % (bedString,bamString,controlBamString,outputFolder,analysisName,maskFile)
+
+# bashFile.write(metaRoseCmd + '\n')
+
+
+
+#==========================================================================
+#=============RUNNING FUNCTIONAL ANALYSIS ON LINES META SE TABLE===========
+#==========================================================================
+
+
+# enhancer_to_gene_path = '%smeta_rose/chordoma_h3K27ac/chordoma_h3K27ac_SuperEnhancers_ENHANCER_TO_GENE.txt' % (projectFolder)
+# output_folder = '%smeta_rose/chordoma_h3K27ac/' % (projectFolder)
+# output_name = 'chordoma_h3K27ac_SuperEnhancers_ENHANCER_TO_GENE_FUNCTION'
+
+# gene_function_bash_path = '%smeta_rose/chordoma_h3K27ac/chordoma_h3k27ac_geneFunctionDB.sh' % (projectFolder)
+
+# gene_function_bash_file = open(gene_function_bash_path,'w')
+# gene_function_bash_file.write('#!/usr/bin/bash\n\n\n')
+# cmd = 'python /ark/home/jr246/tool/geneFunctionDB/geneFunctionDB.py -i %s -o %s -n %s' % (enhancer_to_gene_path,output_folder,output_name)
+# gene_function_bash_file.write("#Running Jaime's stupid gene function db tool on the lines meta SE output")
+# gene_function_bash_file.write('\n')
+# gene_function_bash_file.write(cmd+'\n')
+# gene_function_bash_file.close()
+
+# print('wrote geneFunctionDB command to %s' % (gene_function_bash_path))
+
+# os.system('bash %s' % (gene_function_bash_path))
 
 #==========================================================================
 #===========================PLOTTING BY GFF================================
 #==========================================================================
 
-# figureGFF = [['chr7','CAV','CAV',115827544,116446736,'','+','','CAV'],
-#              ['chr6','T','T',166508099,166598920,'','+','','T'],
-#              ['chr6','T_AMPLICON','T_AMPLICON',165328878,167941884,'','+','','T_AMPLICON'],
-#              ['chr6','CTGF','CTGF',132262895,132281762,'','-','','CTGF'],
-#              ['chr7','TWIST1','TWIST1',19141898,19166920,'','-','','TWIST1'],
-#              ['chr1','PDE4B','PDE4B',66615950,66984899,'','+','','PDE4B'],
-#              ]
+figureGFF = [['chr7','CAV','CAV',115827544,116446736,'','+','','CAV'],
+             ['chr6','T','T',166508099,166598920,'','+','','T'],
+             ['chr6','T_AMPLICON','T_AMPLICON',165328878,167941884,'','+','','T_AMPLICON'],
+             ['chr6','CTGF','CTGF',132262895,132281762,'','-','','CTGF'],
+             ['chr7','TWIST1','TWIST1',19141898,19166920,'','-','','TWIST1'],
+             ['chr1','PDE4B','PDE4B',66615950,66984899,'','+','','PDE4B'],
+             ['chr14','MAX','MAX',65533970,65627288,'','-','','MAX'],
+             ['chr7','EGFR','EGFR',55075519,55285697,'','+','','EGFR'],
+             ]
 
-# figureGFFFile = '%sHG19_PRIMARY_CHORDOMA_FIGURE_GENES.gff' % (gffFolder)
-# utils.unParseTable(figureGFF,figureGFFFile,'\t')
-# outputFolder = '%sgenePlot' % (projectFolder)
+figureGFFFile = '%sHG19_PRIMARY_CHORDOMA_FIGURE_GENES.gff' % (gffFolder)
+utils.unParseTable(figureGFF,figureGFFFile,'\t')
+outputFolder = '%sgenePlot' % (projectFolder)
 
 
 # #making meta plots of k27ac
@@ -396,7 +547,19 @@ output = '%stables/PRIMARY_CHORDOMA_H3K27AC_SUMMARY.txt' % (projectFolder)
 # groupString = string.join(['H3K27AC']*len(plotList),',')
 # print(groupString)
 
-# pipeline_dfci.callBatchPlot(dataFile,figureGFFFile,plotName,outputFolder,namesList=plotList,uniform=True,bed ='',plotType= 'MERGE',extension=200,multiPage = False,debug=False,nameString = groupString)
+#pipeline_dfci.callBatchPlot(dataFile,figureGFFFile,plotName,outputFolder,namesList=plotList,uniform=True,bed ='',plotType= 'MERGE',extension=200,multiPage = False,debug=False,nameString = groupString)
+
+
+
+# #making meta plots of atac
+# atac_dataDict = pipeline_dfci.loadDataTable(atac_data_file)
+# plotList = [name for name in atac_dataDict.keys() if name.count('ATAC') == 1]
+# plotName = 'FIGURE_GENES_ATAC_META'
+# groupString = string.join(['ATAC']*len(plotList),',')
+# print(groupString)
+# print(plotList)
+
+# pipeline_dfci.callBatchPlot(atac_data_file,figureGFFFile,plotName,outputFolder,namesList=plotList,uniform=True,bed ='',plotType= 'MERGE',extension=200,multiPage = False,debug=False,nameString = groupString)
 
 
 
@@ -419,19 +582,29 @@ output = '%stables/PRIMARY_CHORDOMA_H3K27AC_SUMMARY.txt' % (projectFolder)
 
 
 
-# #lines k27ac
-# line_data_file = '%sCHORDOMA_TABLE.txt' % (projectFolder)
+# # chordoma cell lines k27ac
+# line_data_file = '%sdata_tables/CHORDOMA_TABLE.txt' % (projectFolder)
 
 # line_dataDict = pipeline_dfci.loadDataTable(line_data_file)
 
 # plotList = [name for name in line_dataDict.keys() if name.count('H3K27AC') == 1]
-
+# print(plotList)
 # plotName = 'LINES_FIGURE_GENES_H3K27AC_MULTIPLE'
 # pipeline_dfci.callBatchPlot(line_data_file,figureGFFFile,plotName,outputFolder,namesList=plotList,uniform=True,bed ='',plotType= 'MULTIPLE',extension=200,multiPage = False,debug=False,nameString = '')
 
 
 # plotName = 'LINES_FIGURE_GENES_H3K27AC_MULTIPLE_RELATIVE'
 # pipeline_dfci.callBatchPlot(line_data_file,figureGFFFile,plotName,outputFolder,namesList=plotList,uniform=False,bed ='',plotType= 'MULTIPLE',extension=200,multiPage = False,debug=False,nameString = '')
+
+#making meta plots of k27ac in cell lines
+
+# plotName = 'LINES_FIGURE_GENES_H3K27AC_META'
+# groupString = string.join(['H3K27AC']*len(plotList),',')
+# print(groupString)
+
+# pipeline_dfci.callBatchPlot(line_data_file,figureGFFFile,plotName,outputFolder,namesList=plotList,uniform=True,bed ='',plotType= 'MERGE',extension=200,multiPage = False,debug=False,nameString = groupString)
+
+
 
 
 # plotList = ['UCH1_T']
@@ -446,126 +619,120 @@ output = '%stables/PRIMARY_CHORDOMA_H3K27AC_SUMMARY.txt' % (projectFolder)
 #==========================================================================
 
 
-#across all primary datasets
-#analysis name
-analysisName = 'primary_chordoma_h3k27ac_final'
+# #across all primary datasets
+# #analysis name
+# analysisName = 'primary_chordoma_h3k27ac_final'
 
-#dataFile
+# #dataFile
 
-primary_data_file = '%sCHORDOMA_PRIMARY_TABLE.txt' % (projectFolder)
-dataDict = pipeline_dfci.loadDataTable(dataFile)
-
-
-#nameslist
-namesList = ['PRIMARY_CHOR_A269A1_H3K27AC',
-             'PRIMARY_CHOR_01192016_H3K27AC',
-             'PRIMARY_CHOR_12132013_H3K27AC',
-             'PRIMARY_CHOR_142A2_H3K27AC',
-             'PRIMARY_CHOR_194A1_H3K27AC',
-             'PRIMARY_CHOR_243A2_H3K27AC',
-             'PRIMARY_CHOR_4616_H3K27AC',
-             '160831_CHOR_H3K27Ac',
-             ]
+# primary_data_file = '%sdata_tables/CHORDOMA_PRIMARY_TABLE.txt' % (projectFolder)
+# dataDict = pipeline_dfci.loadDataTable(dataFile)
 
 
-
-namesString = string.join(namesList,',')
-
-#set up the output
-utils.formatFolder('%sclustering/' % (projectFolder),True)
-outputFolder = '%sclustering/%s/' % (projectFolder,analysisName)
-outputFolder = utils.formatFolder(outputFolder,True)
-
-#get the rose folder
-roseFolder ='%srose/' % (projectFolder)
-roseFolder = utils.formatFolder('%srose/' % (projectFolder),True)
-
-#get the mask file
-maskFile ='/raider/index/hg19/Masks/hg19_encode_blacklist.bed'
-
-#set up the bash file
-bashFileName = '%s%s_clustering.sh' % (outputFolder,analysisName)
-bashFile = open(bashFileName,'w')
-
-bashFile.write('#!/usr/bin/bash\n')
-
-#for now change into pipelinedir just to be safe
-bashFile.write('cd /ark/home/cl512/pipeline/\n')
-
-
-clusterCmd = 'python /ark/home/cl512/pipeline/clusterEnhancer.py -d %s -i %s -r %s -o %s -n %s -e super -t 2500 --mask %s' % (primary_data_file,namesString,roseFolder,outputFolder,analysisName,maskFile)
-
-bashFile.write(clusterCmd + '\n')
-print(clusterCmd)
-
-bashFile.close()
+# #nameslist
+# namesList = ['PRIMARY_CHOR_A269A1_H3K27AC',
+#              'PRIMARY_CHOR_01192016_H3K27AC',
+#              'PRIMARY_CHOR_12132013_H3K27AC',
+#              'PRIMARY_CHOR_142A2_H3K27AC',
+#              'PRIMARY_CHOR_194A1_H3K27AC',
+#              'PRIMARY_CHOR_243A2_H3K27AC',
+#              'PRIMARY_CHOR_4616_H3K27AC',
+#              '160831_CHOR_H3K27Ac',
+#              ]
 
 
 
+# namesString = string.join(namesList,',')
+
+# #set up the output
+# utils.formatFolder('%sclustering/' % (projectFolder),True)
+# outputFolder = '%sclustering/%s/' % (projectFolder,analysisName)
+# outputFolder = utils.formatFolder(outputFolder,True)
+
+# #get the rose folder
+# roseFolder ='%srose/' % (projectFolder)
+# roseFolder = utils.formatFolder('%srose/' % (projectFolder),True)
+
+# #get the mask file
+# maskFile ='/raider/index/hg19/Masks/hg19_encode_blacklist.bed'
+
+# #set up the bash file
+# bashFileName = '%s%s_clustering.sh' % (outputFolder,analysisName)
+# bashFile = open(bashFileName,'w')
+
+# bashFile.write('#!/usr/bin/bash\n')
+
+# #for now change into pipelinedir just to be safe
+# bashFile.write('cd /ark/home/cl512/pipeline/\n')
 
 
+# clusterCmd = 'python /ark/home/cl512/pipeline/clusterEnhancer.py -d %s -i %s -r %s -o %s -n %s -e super -t 2500 --mask %s' % (primary_data_file,namesString,roseFolder,outputFolder,analysisName,maskFile)
 
+# bashFile.write(clusterCmd + '\n')
+# print(clusterCmd)
 
+# bashFile.close()
 
 
 #=======================================================
 
-#across all  datasets
-#analysis name
-analysisName = 'all_chordoma_h3k27ac_final'
+# #across all  datasets
+# #analysis name
+# analysisName = 'all_chordoma_h3k27ac_final'
 
-#dataFile
-
-all_data_file = '%sCHORDOMA_H3K27AC_ALL_TABLE.txt' % (projectFolder)
-dataDict = pipeline_dfci.loadDataTable(all_data_file)
-pipeline_dfci.summary(all_data_file)
+# #dataFile
 
 
-#nameslist
+# dataDict = pipeline_dfci.loadDataTable(all_data_file)
+# pipeline_dfci.summary(all_data_file)
 
 
-namesList = ['PRIMARY_CHOR_A269A1_H3K27AC',
-             'PRIMARY_CHOR_01192016_H3K27AC',
-             'PRIMARY_CHOR_12132013_H3K27AC',
-             'PRIMARY_CHOR_142A2_H3K27AC',
-             'PRIMARY_CHOR_194A1_H3K27AC',
-             'PRIMARY_CHOR_243A2_H3K27AC',
-             'PRIMARY_CHOR_4616_H3K27AC',
-             '160831_CHOR_H3K27Ac',
-             ]
-
-namesList = namesList + lines_list + ['160831_NAT_H3K27Ac']
-print(namesList)
-namesString = string.join(namesList,',')
-
-#set up the output
-utils.formatFolder('%sclustering/' % (projectFolder),True)
-outputFolder = '%sclustering/%s/' % (projectFolder,analysisName)
-outputFolder = utils.formatFolder(outputFolder,True)
-
-#get the rose folder
-roseFolder ='%srose/' % (projectFolder)
-roseFolder = utils.formatFolder('%srose/' % (projectFolder),True)
-
-#get the mask file
-maskFile ='/raider/index/hg19/Masks/hg19_encode_blacklist.bed'
-
-#set up the bash file
-bashFileName = '%s%s_clustering.sh' % (outputFolder,analysisName)
-bashFile = open(bashFileName,'w')
-
-bashFile.write('#!/usr/bin/bash\n')
-
-#for now change into pipelinedir just to be safe
-bashFile.write('cd /ark/home/cl512/pipeline/\n')
+# #nameslist
 
 
-clusterCmd = 'python /ark/home/cl512/pipeline/clusterEnhancer.py -d %s -i %s -r %s -o %s -n %s -e super -t 2500 --mask %s' % (all_data_file,namesString,roseFolder,outputFolder,analysisName,maskFile)
+# namesList = ['PRIMARY_CHOR_A269A1_H3K27AC',
+#              'PRIMARY_CHOR_01192016_H3K27AC',
+#              'PRIMARY_CHOR_12132013_H3K27AC',
+#              'PRIMARY_CHOR_142A2_H3K27AC',
+#              'PRIMARY_CHOR_194A1_H3K27AC',
+#              'PRIMARY_CHOR_243A2_H3K27AC',
+#              'PRIMARY_CHOR_4616_H3K27AC',
+#              '160831_CHOR_H3K27Ac',
+#              ]
 
-bashFile.write(clusterCmd + '\n')
-print(clusterCmd)
+# namesList = namesList + lines_list + ['160831_NAT_H3K27Ac']
+# print(namesList)
+# print(len(namesList))
+# namesString = string.join(namesList,',')
 
-bashFile.close()
+# #set up the output
+# utils.formatFolder('%sclustering/' % (projectFolder),True)
+# outputFolder = '%sclustering/%s/' % (projectFolder,analysisName)
+# outputFolder = utils.formatFolder(outputFolder,True)
+
+# #get the rose folder
+# roseFolder ='%srose/' % (projectFolder)
+# roseFolder = utils.formatFolder('%srose/' % (projectFolder),True)
+
+# #get the mask file
+# maskFile ='/raider/index/hg19/Masks/hg19_encode_blacklist.bed'
+
+# #set up the bash file
+# bashFileName = '%s%s_clustering_test.sh' % (outputFolder,analysisName)
+# bashFile = open(bashFileName,'w')
+
+# bashFile.write('#!/usr/bin/bash\n')
+
+# #for now change into pipelinedir just to be safe
+# bashFile.write('cd /ark/home/cl512/pipeline/\n')
+
+
+# clusterCmd = 'python /ark/home/cl512/pipeline/clusterEnhancer.py -d %s -i %s -r %s -o %s -n %s -e super -t 2500 --mask %s' % (all_data_file,namesString,roseFolder,outputFolder,analysisName,maskFile)
+
+# bashFile.write(clusterCmd + '\n')
+# print(clusterCmd)
+
+# bashFile.close()
 
 
 #==========================================================================
@@ -905,116 +1072,122 @@ def binPeakTable(peak_table_path,activity_path,binSize = 1000000,output = ''):
 
 
 
-# def makeGEOTable(dataFile,wiggleFolder,macsFolder,namesList,geoName,outputFolder =''):
+def makeGEOTable(dataFile,wiggleFolder,macsFolder,namesList,geoName,outputFolder =''):
 
-#     '''
-#     makes a geo table and a bash script to format everything
-#     '''
-#     dataDict = pipeline_dfci.loadDataTable(dataFile)
+    '''
+    makes a geo table and a bash script to format everything
+    '''
+    dataDict = pipeline_dfci.loadDataTable(dataFile)
 
-#     #first make a reverse wce dict
+    #first make a reverse wce dict
+    if len(namesList) == 0:
+        namesList = dataDict.keys()
+    namesList.sort()
 
-#     backgroundDict = {}
-#     for name in namesList:
+    backgroundDict = {}
+    for name in namesList:
 
-#         background = dataDict[name]['background']
-#         backgroundDict[background] = name
-
-
-#     outputFolder = pipeline_dfci.formatFolder(outputFolder,True)
-#     bashFileName = '%s%s_bash.sh' % (outputFolder,geoName)
-
-#     bashFile = open(bashFileName,'w')
+        background = dataDict[name]['background']
+        backgroundDict[background] = name
 
 
+    outputFolder = pipeline_dfci.formatFolder(outputFolder,True)
+    bashFileName = '%s%s_bash.sh' % (outputFolder,geoName)
 
+    bashFile = open(bashFileName,'w')
 
-#     geoTable = [['SAMPLE_NAME','TITLE','CELL_TYPE','PROCESSED_FILE','RAW_FILE','BARCODE']]
-
-
-#     namesList.sort()
-
-#     for name in namesList:
-
-#         sampleName = dataDict[name]['uniqueID']
-#         title = name
-#         cell_type = name.split('_')[0]
-#         processed_file = "%s.wig.gz" % (name)
-#         raw_file = "%s.fastq.gz" % (name)
-        
-#         fastqFile = dataDict[name]['fastq']
-#         uniqueID = dataDict[name]['uniqueID']
-#         try:
-#             barcode = pipeline_dfci.getTONYInfo(uniqueID,38)
-#         except IndexError:
-#             barcode = ''
-#         newLine = [sampleName,title,cell_type,processed_file,raw_file,barcode]
-#         geoTable.append(newLine)
-        
-
-#     utils.unParseTable(geoTable,"%s%s_meta.xls" % (outputFolder,geoName),'\t')
-
-#     #now make the folder to hold everything and the relevant bash script
-#     if len(outputFolder) == 0:
-#         outputFolder ='./%s/' % (geoName)
-        
-#     else:
-#         outputFolder = outputFolder + geoName + '/'
     
-#     pipeline_dfci.formatFolder(outputFolder,True)
-
-#     wiggleFolder = pipeline_dfci.formatFolder(wiggleFolder,False)
-#     macsFolder = pipeline_dfci.formatFolder(macsFolder,False)
 
 
-#     #now make the bash file
-#     bashFile.write('#!/usr/bin/bash\n')
-#     bashFile.write('cd %s\n' %(outputFolder))
-#     bashFile.write('\n')
-
-#     #write the untar command
-#     for name in namesList:
-#         fastqFile = dataDict[name]['fastq']
-#         if len(fastqFile) == 0:
-#             print "NO FASTQ FILE FOR %s" % (name)
-#             continue
-#         tarCmd = 'cp %s %s.fastq.gz\n' % (fastqFile,name)
-#         bashFile.write(tarCmd)
-
-#     bashFile.write('\n\n\n')
-#     #write the wiggle cp command
-#     for name in namesList:
-#         if name.count('WCE') == 1:
-#             refName = backgroundDict[name]
-#             controlWiggleFile = '%s%s/%s_MACS_wiggle/control/%s_control_afterfiting_all.wig.gz' % (macsFolder,refName,refName,refName)
-#             wigCmd = "cp '%s' %s.wig.gz\n" % (controlWiggleFile,name)
-#             #wigCmd = "cp '%swceWiggles/%s_control_afterfiting_all.wig.gz' %s.wig.gz\n" % (wiggleFolder,refName,name)
-#         else:
-#             wigCmd = "cp '%s%s_treat_afterfiting_all.wig.gz' %s.wig.gz\n" % (wiggleFolder,name,name)
-#         bashFile.write(wigCmd)
-
-#     #write the md5sums for the wiggles
-#     bashFile.write('\n\n\n')
-#     bashFile.write("echo '' > md5sum.txt\n")
-#     for name in namesList:
-#         md5Cmd = 'md5sum %s.wig.gz >> md5sum.txt\n' % (name)
-#         bashFile.write(md5Cmd)
-
-#     #write md5sums for the fastqs    
-#     for name in namesList:
-#         md5Cmd = 'md5sum %s.fastq.gz >> md5sum.txt\n' % (name)
-#         bashFile.write(md5Cmd)
-
-#     #the big tar command
-#     tarCmd = '#tar -cvzf %s.tar.gz %s\n' % (geoName,outputFolder)
-#     bashFile.write(tarCmd)
-#     bashFile.close()
+    geoTable = [['SAMPLE_NAME','TITLE','CELL_TYPE','PROCESSED_FILE','RAW_FILE','BARCODE']]
 
 
+    for name in namesList:
 
+        sampleName = dataDict[name]['uniqueID']
+        title = name
+        cell_type = name.split('_')[0]
+        processed_file = "%s.wig.gz" % (name)
+        raw_file = "%s.fastq.gz" % (name)
+        
+        fastqFile = dataDict[name]['fastq']
+        uniqueID = dataDict[name]['uniqueID']
+        try:
+            barcode = pipeline_dfci.getTONYInfo(uniqueID,38)
+        except IndexError:
+            barcode = ''
+        newLine = [sampleName,title,cell_type,processed_file,raw_file,barcode]
+        geoTable.append(newLine)
+        
+
+    utils.unParseTable(geoTable,"%s%s_meta.xls" % (outputFolder,geoName),'\t')
+
+    #now make the folder to hold everything and the relevant bash script
+    if len(outputFolder) == 0:
+        outputFolder ='./%s/' % (geoName)
+        
+    else:
+        outputFolder = outputFolder + geoName + '/'
+    
+    pipeline_dfci.formatFolder(outputFolder,True)
+
+    wiggleFolder = pipeline_dfci.formatFolder(wiggleFolder,False)
+    macsFolder = pipeline_dfci.formatFolder(macsFolder,False)
+
+
+    #now make the bash file
+    bashFile.write('#!/usr/bin/bash\n')
+    bashFile.write('cd %s\n' %(outputFolder))
+    bashFile.write('\n')
+
+    #write the untar command
+    for name in namesList:
+        fastqFile = dataDict[name]['fastq']
+        if len(fastqFile) == 0:
+            print "NO FASTQ FILE FOR %s" % (name)
+            continue
+        tarCmd = 'cp %s %s.fastq.gz\n' % (fastqFile,name)
+        bashFile.write(tarCmd)
+
+    bashFile.write('\n\n\n')
+    #write the wiggle cp command
+    for name in namesList:
+        if name.count('WCE') == 1 or name.upper().count('INPUT') == 1:
+            refName = backgroundDict[name]
+            controlWiggleFile = '%s%s/%s_MACS_wiggle/control/%s_control_afterfiting_all.wig.gz' % (macsFolder,refName,refName,refName)
+            wigCmd = "cp '%s' %s.wig.gz\n" % (controlWiggleFile,name)
+            #wigCmd = "cp '%swceWiggles/%s_control_afterfiting_all.wig.gz' %s.wig.gz\n" % (wiggleFolder,refName,name)
+        else:
+            wigCmd = "cp '%s%s_treat_afterfiting_all.wig.gz' %s.wig.gz\n" % (wiggleFolder,name,name)
+        bashFile.write(wigCmd)
+
+    #write the md5sums for the wiggles
+    bashFile.write('\n\n\n')
+    bashFile.write("echo '' > md5sum.txt\n")
+    for name in namesList:
+        md5Cmd = 'md5sum %s.wig.gz >> md5sum.txt\n' % (name)
+        bashFile.write(md5Cmd)
+
+    #write md5sums for the fastqs    
+    for name in namesList:
+        md5Cmd = 'md5sum %s.fastq.gz >> md5sum.txt\n' % (name)
+        bashFile.write(md5Cmd)
+
+    #the big tar command
+    tarCmd = '#tar -cvzf %s.tar.gz %s\n' % (geoName,outputFolder)
+    bashFile.write(tarCmd)
+    bashFile.close()
+
+
+#for atac_seq
 # namesList = ['MUGCHOR','UCH2_1','UCH2_2']
-# geoName = 'chordoma'
-# #makeGEOTable(dataFile,wiggleFolder,macsEnrichedFolder,namesList,geoName,outputFolder ='%sgeo/' % (projectFolder))
+# geoName = 'chordoma_atac'
+# makeGEOTable(atac_data_file,wiggleFolder,macsEnrichedFolder,namesList,geoName,outputFolder ='%sgeo/' % (projectFolder))
+
+#for cell lines and primary h3k27ac
+# namesList = []
+# geoName = 'chordoma_h3k27ac'
+# makeGEOTable(all_data_file,wiggleFolder,macsFolder,namesList,geoName,outputFolder ='%sgeo/' % (projectFolder))
 
 #==========================================================================
 #=============================CALLING CRC==================================
